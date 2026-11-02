@@ -1,0 +1,58 @@
+# Egress allowlist. O modo padrão observe NÃO restringe saída.
+# egress_mode: enforce restringe somente as contas agent_users, nunca root/admin.
+# O timer devvps-egress-refresh atualiza os IPs a cada 5 minutos após o serviço.
+# DNS indisponível gera aviso e omite o destino até o próximo refresh, sem liberar.
+# Falha nft mantém a tabela anterior. IPs de CDNs não validam Host/SNI nem acesso
+# a repositórios. Root mantém apt e Tailscale fora desta política.
+
+version: 1
+
+# DNS dos agentes passa somente pelo stub local (loopback, systemd-resolved).
+# NTP é responsabilidade do serviço do sistema, fora dos UIDs restringidos.
+# Permissões de protocolo abaixo dependem dos IPs da allowlist.
+always_allow:
+  - protocol: tcp
+    port: 443
+    destinations: dynamic  # via domains abaixo + tailscale coordination HTTPS
+
+domains:
+  # Sistema / updates
+  - archive.ubuntu.com
+  - security.ubuntu.com
+  - changelogs.ubuntu.com
+  - motd.ubuntu.com
+
+  # Tailscale
+  - controlplane.tailscale.com
+  - log.tailscale.com
+  - login.tailscale.com
+
+  # Git (repos allowlisted)
+  - github.com
+  - api.github.com
+  - raw.githubusercontent.com
+  - objects.githubusercontent.com
+  - codeload.github.com
+
+  # APIs de ferramentas: Anthropic ativo; demais exemplos opcionais comentados
+  - api.anthropic.com
+  - statsig.anthropic.com
+  # - api.openai.com
+  # - api.x.ai
+  # - api2.cursor.sh
+
+  # Toolchain comum
+  - registry.npmjs.org
+  - deb.nodesource.com
+  - packages.cloud.google.com
+
+static_cidrs:
+  # Exemplos de destinos estáticos HTTPS: revise a necessidade; não são uma lista DERP.
+  - 149.112.112.112/32   # HTTPS: DNS dos agentes continua restrito ao stub local
+  - 1.1.1.1/32
+  - 8.8.8.8/32
+
+policy:
+  default_outbound: deny
+  allow_established_related: true
+  log_dropped: true

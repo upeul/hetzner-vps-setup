@@ -1,0 +1,8 @@
+# Copie para inventory/hosts.yml (gitignored) após Tailscale join.
+# ansible_host = IP 100.x do Tailscale
+
+all:
+  hosts:
+    vps-dev:
+      ansible_host: 100.x.x.x   # substituir
+      ansible_user: admin

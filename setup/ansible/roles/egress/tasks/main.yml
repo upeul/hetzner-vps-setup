@@ -1,0 +1,140 @@
+---
+- name: Validar modo e contas da política egress
+  assert:
+    that:
+      - (egress_mode | default('observe')) in ['observe', 'enforce']
+      - agent_users | length > 0
+      - admin_user not in (agent_users | map(attribute='name') | list)
+      - "'root' not in (agent_users | map(attribute='name') | list)"
+      - agent_users | selectattr('sudo', 'equalto', false) | list | length == agent_users | length
+    fail_msg: Egress requer observe ou enforce e apenas contas de agentes sem sudo, nunca root ou o administrador.
+
+- name: Criar diretório config egress
+  file:
+    path: /etc/devvps
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Copiar config egress
+  copy:
+    src: "{{ playbook_dir }}/../config/egress-allowlist.yaml"
+    dest: /etc/devvps/egress-allowlist.yaml
+    owner: root
+    group: root
+    mode: "0640"
+  register: egress_config
+
+- name: Registrar todas as contas de agentes na política por UID
+  copy:
+    dest: /etc/devvps/egress-users
+    content: "{{ agent_users | map(attribute='name') | join('\n') }}\n"
+    owner: root
+    group: root
+    mode: "0640"
+  register: egress_users_file
+
+- name: Garantir diretório nftables.d
+  file:
+    path: /etc/nftables.d
+    state: directory
+    mode: "0755"
+
+- name: Copiar script de egress
+  copy:
+    src: "{{ playbook_dir }}/../scripts/render-egress-nftables.sh"
+    dest: /usr/local/sbin/render-egress-nftables.sh
+    owner: root
+    group: root
+    mode: "0755"
+  register: egress_script
+
+- name: Remover include legado da tabela gerenciada pelo serviço dedicado
+  lineinfile:
+    path: /etc/nftables.conf
+    line: 'include "/etc/nftables.d/egress-allowlist.nft"'
+    state: absent
+
+- name: Instalar serviço com resolução DNS e substituição atômica da tabela
+  copy:
+    dest: /etc/systemd/system/devvps-egress.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Apply devvps per-UID egress policy
+      After=network-online.target ufw.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/render-egress-nftables.sh /etc/devvps/egress-allowlist.yaml /etc/nftables.d/egress-allowlist.nft {{ egress_mode | default('observe') }} /etc/devvps/egress-users --apply
+      TimeoutStartSec=120
+      UMask=0027
+
+      [Install]
+      WantedBy=multi-user.target
+  register: egress_unit
+
+- name: Instalar timer de atualização dos endereços IPv4 e IPv6
+  copy:
+    dest: /etc/systemd/system/devvps-egress-refresh.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Refresh devvps egress DNS snapshots
+
+      [Timer]
+      OnBootSec=2min
+      OnUnitInactiveSec=5min
+      RandomizedDelaySec=30s
+      Unit=devvps-egress.service
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Validar unidades antes de ativar a política
+  command:
+    argv:
+      - systemd-analyze
+      - verify
+      - /etc/systemd/system/devvps-egress.service
+      - /etc/systemd/system/devvps-egress-refresh.timer
+  changed_when: false
+
+# Não parar nftables.service: seu ExecStop pode executar flush ruleset e apagar UFW.
+# A tabela dedicada é aplicada em lote sem tocar nas tabelas de outros serviços.
+- name: Desabilitar carregamento genérico de nftables sem apagar regras existentes
+  systemd:
+    name: nftables
+    enabled: false
+
+- name: Ler modo egress carregado
+  command: nft list chain inet egress_allow output
+  register: egress_loaded
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Habilitar serviço egress
+  systemd:
+    name: devvps-egress.service
+    daemon_reload: true
+    enabled: true
+
+- name: Validar e aplicar devvps-egress sem descartar a última política válida
+  systemd:
+    name: devvps-egress.service
+    daemon_reload: true
+    enabled: true
+    state: restarted
+  when: >-
+    egress_config.changed or egress_users_file.changed or egress_script.changed or
+    egress_unit.changed or egress_loaded.rc != 0 or
+    ('egress mode: ' ~ egress_mode) not in egress_loaded.stdout
+
+- name: Ativar atualização periódica da política egress
+  systemd:
+    name: devvps-egress-refresh.timer
+    enabled: true
+    state: started

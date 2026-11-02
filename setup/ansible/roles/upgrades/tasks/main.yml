@@ -1,0 +1,20 @@
+---
+- name: Configurar unattended-upgrades
+  copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "{{ unattended_upgrades | bool | ternary('1', '0') }}";
+      APT::Periodic::Unattended-Upgrade "{{ unattended_upgrades | bool | ternary('1', '0') }}";
+      Unattended-Upgrade::Automatic-Reboot "false";
+
+- name: Habilitar unattended-upgrades
+  apt:
+    name: unattended-upgrades
+    state: present
+
+- name: Ativar serviço
+  systemd:
+    name: unattended-upgrades
+    enabled: "{{ unattended_upgrades | bool }}"
+    state: "{{ unattended_upgrades | bool | ternary('started', 'stopped') }}"

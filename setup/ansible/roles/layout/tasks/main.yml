@@ -1,0 +1,38 @@
+---
+- name: Criar diretórios devvps
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ dev_root }}"
+    - "{{ dev_root }}/repos"
+    - "{{ dev_root }}/releases"
+    - "{{ dev_root }}/artifacts"
+    - "{{ dev_root }}/launchers"
+    - "{{ dev_root }}/worktrees"
+    - /var/lib/devvps
+    - /var/log/devvps
+
+- name: Criar worktrees por usuário
+  file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "0700"
+  loop:
+    - { owner: ide, path: "{{ dev_root }}/worktrees/ide" }
+    - { owner: agent-claude, path: "{{ dev_root }}/worktrees/claude" }
+    - { owner: agent-codex, path: "{{ dev_root }}/worktrees/codex" }
+    - { owner: agent-grok, path: "{{ dev_root }}/worktrees/grok" }
+
+- name: Copiar allowlist de repos para o host
+  copy:
+    src: "{{ playbook_dir }}/../config/repo-allowlist.example.yaml"
+    dest: "{{ dev_root }}/repo-allowlist.yaml"
+    owner: root
+    group: root
+    mode: "0644"

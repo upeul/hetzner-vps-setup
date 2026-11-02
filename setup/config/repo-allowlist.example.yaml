@@ -1,0 +1,7 @@
+# Política administrativa: não bloqueia acesso Git ou clones.
+version: 1
+repos:
+  - repo: exemplo-org/repo-a
+    autorizado_por: admin
+  - repo: exemplo-org/repo-b
+    autorizado_por: admin

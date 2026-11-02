@@ -1,0 +1,13 @@
+{
+  "//": "Substitua REPLACE_WITH_TAILNET_LOGIN pelo login real antes de aplicar. Nunca publique a política real.",
+  "groups": {"group:operators": ["REPLACE_WITH_TAILNET_LOGIN"]},
+  "acls": [
+    {"action": "accept", "src": ["group:operators"], "proto": "tcp", "dst": ["tag:dev-vps:22"]}
+  ],
+  "tagOwners": {"tag:dev-vps": ["group:operators"]},
+  "//notes": [
+    "Registre a VPS com tag:dev-vps e revise outras regras que possam conceder acesso.",
+    "Desative Tailscale SSH com tailscale set --ssh=false; use OpenSSH por chave.",
+    "Sem permissão para conexões iniciadas pela VPS a outros nós; egress à internet é separado."
+  ]
+}

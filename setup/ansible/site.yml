@@ -1,0 +1,31 @@
+---
+- name: VPS dev personal - hardening
+  hosts: all
+  gather_facts: true
+
+  pre_tasks:
+    - name: Garantir Ubuntu 24.04
+      assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version == "24.04"
+        fail_msg: "Esperado Ubuntu 24.04 Server"
+
+  roles:
+    - role: base
+    - role: users
+    - role: sshd
+    - role: host_firewall
+    - role: layout
+    - role: egress
+    - role: upgrades
+    # Por último: falha se sobrar listener MPTCP, depois de aplicar a mitigação
+    - role: cve_2026_98432
+
+  post_tasks:
+    - name: Receipt de ausência de sudo para todos os usuários de execução
+      command: "sudo -l -U {{ item.name }} /usr/bin/true"
+      loop: "{{ agent_users }}"
+      register: agent_sudo
+      failed_when: agent_sudo.rc == 0
+      changed_when: false

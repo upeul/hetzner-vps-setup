@@ -1,0 +1,39 @@
+---
+# Variáveis globais: layout e usuários
+
+dev_root: /srv/dev
+
+agent_users:
+  - name: "{{ ide_user }}"
+    groups: []
+    shell: /bin/bash
+    sudo: false
+    comment: Cursor Remote SSH
+  - name: agent-claude
+    groups: []
+    shell: /bin/bash
+    sudo: false
+  - name: agent-codex
+    groups: []
+    shell: /bin/bash
+    sudo: false
+  - name: agent-grok
+    groups: []
+    shell: /bin/bash
+    sudo: false
+
+admin_user: admin
+ide_user: ide
+
+sshd_hardening:
+  # Consumido pelo role sshd no primeiro drop-in.
+  PermitRootLogin: "no"
+  PasswordAuthentication: "no"
+  KbdInteractiveAuthentication: "no"
+  X11Forwarding: "no"
+  AllowUsers: "{{ ([admin_user] + (agent_users | map(attribute='name') | list)) | join(' ') }}"
+
+unattended_upgrades: true
+
+# observe registra sem restringir; enforce restringe somente os UIDs gerenciados.
+egress_mode: observe

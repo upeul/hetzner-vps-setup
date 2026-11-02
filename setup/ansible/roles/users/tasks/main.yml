@@ -1,0 +1,71 @@
+---
+- name: Garantir grupo sudo para admin
+  group:
+    name: sudo
+    state: present
+
+- name: Exigir contrato de usuários sem sudo antes de alterar contas
+  assert:
+    that:
+      - item.name != admin_user
+      - item.name != 'root'
+      - not item.sudo | bool
+      - "'sudo' not in item.groups"
+      - "'admin' not in item.groups"
+  loop: "{{ agent_users }}"
+
+- name: Criar usuários sem grupos privilegiados herdados
+  user:
+    name: "{{ item.name }}"
+    shell: "{{ item.shell }}"
+    groups: "{{ item.groups | join(',') }}"
+    append: false
+    create_home: true
+    comment: "{{ item.comment | default(item.name) }}"
+  loop: "{{ agent_users }}"
+
+- name: Isolar diretórios pessoais dos usuários de execução
+  file:
+    path: "/home/{{ item.name }}"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0700"
+  loop: "{{ agent_users }}"
+
+- name: Garantir admin no sudo
+  user:
+    name: "{{ admin_user }}"
+    groups: sudo
+    append: true
+
+- name: Negar sudo a todos os usuários de execução inclusive grants externos
+  copy:
+    dest: /etc/sudoers.d/zz-devvps-agent-deny
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+    content: |
+      # Gerenciado pelo Ansible: nenhum comando sudo para UIDs de execução.
+      {% for user in agent_users %}
+      {{ user.name }} ALL=(ALL:ALL) !ALL
+      {% endfor %}
+
+- name: Ler authorized_keys do admin no host
+  slurp:
+    src: "/home/{{ admin_user }}/.ssh/authorized_keys"
+  register: admin_authorized_keys
+
+- name: Exigir chave pública instalada antes de continuar
+  assert:
+    that:
+      - admin_authorized_keys.content | b64decode | trim | length > 0
+    fail_msg: "Instale uma chave SSH válida para o admin antes do playbook."
+
+- name: Instalar mesma chave nos demais usuários
+  authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ admin_authorized_keys.content | b64decode }}"
+    state: present
+  loop: "{{ agent_users }}"

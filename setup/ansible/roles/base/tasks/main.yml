@@ -1,0 +1,32 @@
+---
+- name: Pacotes base
+  apt:
+    name:
+      - git
+      - tmux
+      - curl
+      - ca-certificates
+      - gnupg
+      - ufw
+      - nftables
+      - acl
+      - python3
+      - python3-pip
+      - python3-yaml
+      - nodejs
+      - npm
+      - openssh-server
+      - sudo
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+    update_cache: true
+
+- name: Timezone UTC
+  timezone:
+    name: UTC
+
+- name: Locale UTF-8
+  locale_gen:
+    name: en_US.UTF-8
+    state: present

@@ -1,0 +1,90 @@
+---
+- name: Garantir diretório privilege separation
+  file:
+    path: /run/sshd
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Garantir diretório de configuração SSH
+  file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    mode: "0755"
+
+- name: Remover opção obsoleta
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^ChallengeResponseAuthentication"
+    state: absent
+  notify: Reload ssh
+
+- name: Remover Include duplicado criado pelo hardening anterior
+  blockinfile:
+    path: /etc/ssh/sshd_config
+    marker: "# {mark} ANSIBLE HARDENING INCLUDE"
+    state: absent
+  notify: Reload ssh
+
+- name: Ler configuração principal SSH
+  slurp:
+    src: /etc/ssh/sshd_config
+  register: sshd_main_config
+
+- name: Exigir Include Ubuntu 24.04 antes das diretivas escalares
+  assert:
+    that:
+      - "((sshd_main_config.content | b64decode).splitlines() | map('trim') | reject('match', '^(#|$)') | first) == 'Include /etc/ssh/sshd_config.d/*.conf'"
+    fail_msg: "O Include padrão deve ser a primeira diretiva ativa do sshd_config."
+
+- name: Remover drop-in antigo sem precedência
+  file:
+    path: /etc/ssh/sshd_config.d/99-hardening.conf
+    state: absent
+  notify: Reload ssh
+
+- name: Instalar primeiro drop-in de hardening
+  copy:
+    dest: /etc/ssh/sshd_config.d/00-hardening.conf
+    mode: "0644"
+    owner: root
+    group: root
+    content: |
+      # Gerenciado pelo Ansible.
+      {% for option, value in sshd_hardening.items() %}
+      {{ option }} {{ value }}
+      {% endfor %}
+  notify: Reload ssh
+
+- name: Validar configuração SSH antes de reload
+  command: /usr/sbin/sshd -t
+  changed_when: false
+
+- name: Obter configuração SSH efetiva
+  command: /usr/sbin/sshd -T
+  register: effective_sshd
+  changed_when: false
+  check_mode: false
+
+- name: Exigir valores efetivos de hardening
+  assert:
+    that:
+      - "(item.key | lower ~ ' ' ~ item.value | lower) in effective_sshd.stdout_lines"
+    fail_msg: "sshd efetivo diverge de {{ item.key }}. Nenhum reload foi executado."
+  loop: "{{ sshd_hardening | dict2items | rejectattr('key', 'equalto', 'AllowUsers') | list }}"
+
+- name: Exigir allowlist SSH efetiva exata
+  assert:
+    that:
+      - "((effective_sshd.stdout_lines | select('match', '^allowusers ') | map('regex_replace', '^allowusers ', '') | join(' ')).split() | unique | sort) == (sshd_hardening.AllowUsers.split() | sort)"
+
+- name: Aplicar reload validado antes de prosseguir
+  meta: flush_handlers
+
+# Também cobre retomada após falha anterior à execução dos handlers.
+- name: Garantir configuração validada carregada em retomadas
+  systemd:
+    name: ssh
+    state: reloaded
+  changed_when: false

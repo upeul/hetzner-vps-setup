@@ -1,0 +1,132 @@
+---
+# CVE-2026-98432 (CVSS 9.8, kernel.org CNA): use-after-free no handshake TCP/IPv4
+# do kernel (>= 4.4), alcançável sem autenticação por um SYN com opções IPv4.
+# O exploit de root remoto demonstrado (Anthropic) usa um listener MPTCP; o bug
+# em si está no TCP/IPv4 comum e não depende de MPTCP.
+#
+# Correção = kernel corrigido pela distribuição + reboot. O role `upgrades`
+# instala o kernel quando sair; o reboot continua manual (ver RUNBOOK, seção Atualizações e CVE).
+# Este role só reduz a exposição até lá e pode ficar depois do kernel corrigido:
+# 1. MPTCP desligado (sysctl persistente) e falha se sobrar listener MPTCP;
+# 2. nftables descarta TCP/IPv4 com opções IP em prerouting, antes do stack TCP.
+# Regra da AlmaLinux (2026-10-30); .nft e unit com os caminhos do passo 3.2 do
+# checklist público github.com/upeul/cve-2026-98432-linux. Tabela própria: não
+# usa /etc/nftables.conf (começa com `flush ruleset` e apagaria UFW/egress).
+
+# Kernel sem MPTCP não tem a chave; o cenário MPTCP não existe, a regra nft segue.
+- name: CVE-2026-98432 - kernel tem MPTCP?
+  stat:
+    path: /proc/sys/net/mptcp/enabled
+  register: cve_mptcp_key
+
+- name: CVE-2026-98432 - MPTCP desligado (persistente e agora)
+  sysctl:
+    name: net.mptcp.enabled
+    value: "0"
+    sysctl_file: /etc/sysctl.d/99-cve-2026-98432.conf
+    state: present
+    reload: true
+  when: cve_mptcp_key.stat.exists
+
+- name: CVE-2026-98432 - regra nftables (descarta TCP/IPv4 com opções IP)
+  copy:
+    dest: /etc/nft-cve-2026-98432.nft
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/nft -c -f %s
+    content: |
+      add table ip cve_2026_98432
+      delete table ip cve_2026_98432
+      table ip cve_2026_98432 {
+          chain prerouting {
+              type filter hook prerouting priority -300; policy accept;
+              meta l4proto tcp ip hdrlength > 5 counter drop
+          }
+      }
+  register: cve_nft_file
+
+- name: CVE-2026-98432 - unit que carrega a regra no boot
+  copy:
+    dest: /etc/systemd/system/cve-2026-98432.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Mitigacao CVE-2026-98432 (descarta TCP IPv4 com opcoes IP)
+      Wants=network-pre.target
+      Before=network-pre.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/sbin/nft -f /etc/nft-cve-2026-98432.nft
+      ExecStop=-/usr/sbin/nft delete table ip cve_2026_98432
+
+      [Install]
+      WantedBy=multi-user.target
+  register: cve_unit
+
+# A unit pode constar `active` depois de outro programa apagar ou trocar a
+# tabela; quem prova a proteção é a chain carregada igual à esperada
+# (vars/main.yml), ligada ao hook prerouting.
+- name: CVE-2026-98432 - chain carregada antes da aplicação
+  command: nft list chain ip cve_2026_98432 prerouting
+  register: cve_chain_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: CVE-2026-98432 - habilitar e carregar a regra
+  systemd:
+    name: cve-2026-98432
+    daemon_reload: true
+    enabled: true
+    state: "{{ 'restarted' if (cve_nft_file.changed or cve_unit.changed or not (cve_chain_before_ok | bool)) else 'started' }}"
+  vars:
+    cve_chain_before_ok: >-
+      {{ cve_chain_before.rc == 0 and
+         (cve_chain_before.stdout | regex_replace('\s+', ' ')
+          | regex_replace('packets [0-9]+ bytes [0-9]+', 'packets N bytes N') | trim)
+         == cve_2026_98432_chain_expected }}
+  # Check mode na primeira aplicação: a unit ainda não existe
+  when: not (ansible_check_mode and cve_unit.changed)
+
+- name: CVE-2026-98432 - confirmar regra ativa
+  command: nft list chain ip cve_2026_98432 prerouting
+  register: cve_chain
+  changed_when: false
+  failed_when: >-
+    cve_chain.rc != 0 or
+    (cve_chain.stdout | regex_replace('\s+', ' ')
+     | regex_replace('packets [0-9]+ bytes [0-9]+', 'packets N bytes N') | trim)
+    != cve_2026_98432_chain_expected
+  when: not ansible_check_mode
+
+# O sysctl só vale para sockets novos: listener aberto antes continua MPTCP.
+- name: CVE-2026-98432 - listeners MPTCP abertos
+  command: ss -Hlnp --mptcp
+  register: cve_mptcp_listeners
+  changed_when: false
+  check_mode: false
+
+- name: CVE-2026-98432 - falhar se sobrar listener MPTCP
+  fail:
+    msg: |
+      Listeners MPTCP ainda abertos (cenário do exploit demonstrado).
+      Reinicie os serviços donos e rode o playbook de novo:
+      {{ cve_mptcp_listeners.stdout }}
+  when: cve_mptcp_listeners.stdout | trim | length > 0
+
+- name: CVE-2026-98432 - reboot pendente?
+  stat:
+    path: /var/run/reboot-required
+  register: cve_reboot_required
+
+- name: CVE-2026-98432 - lembrete do kernel
+  debug:
+    msg: >-
+      Kernel em execução {{ ansible_kernel }}. A mitigação não corrige o bug:
+      compare com https://ubuntu.com/security/CVE-2026-98432 na mesma variante.
+      {{ 'REBOOT PENDENTE (/var/run/reboot-required).' if cve_reboot_required.stat.exists else 'Sem reboot pendente.' }}

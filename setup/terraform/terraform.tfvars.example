@@ -1,0 +1,21 @@
+# Copie para terraform.tfvars (gitignored) ou exporte HCLOUD_TOKEN
+
+# hcloud_token: prefira prompt protegido e HCLOUD_TOKEN somente na sessão.
+
+project_name = "dev-vps"
+server_name  = "dev-vps-1"
+server_type  = "cx53"  # confirme disponibilidade e preço oficial antes do apply
+location     = "nbg1"
+
+# Chave pública do Mac de admin
+ssh_public_key_path = "~/.ssh/dev_vps_ed25519.pub"
+
+# Gere localmente com mkpasswd -m sha-512 ou openssl passwd -6 (prompt protegido).
+# Descomente e cole um hash SHA-512 crypt completo ou deixe comentado e use
+# TF_VAR_admin_password_hash (a linha ativa no tfvars vence a variável de ambiente).
+# Nunca commite o real.
+# admin_password_hash = "$6$SUBSTITUA$HASH_SHA512_CRYPT_GERADO_LOCALMENTE"
+
+bootstrap_open_ssh = false
+# Obrigatório se abrir bootstrap: prefixo mínimo /24 IPv4 ou /64 IPv6; prefira /32 ou /128.
+# bootstrap_ssh_cidr = "203.0.113.10/32"

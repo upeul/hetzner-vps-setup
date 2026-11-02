@@ -1,0 +1,42 @@
+---
+- name: Ler conexão SSH no usuário de login sem sudo env_reset
+  command: printenv SSH_CONNECTION
+  become: false
+  vars:
+    ansible_become: false
+  changed_when: false
+  check_mode: false
+  register: firewall_ssh_connection
+  when: ansible_connection not in ['community.docker.docker', 'docker']
+
+- name: Exigir conexão SSH já estabelecida pela tailnet
+  assert:
+    that:
+      - ansible_default_ipv4 is defined or ansible_default_ipv6 is defined
+      - "'tailscale0' in ansible_interfaces"
+      - firewall_ssh_connection.stdout.split() | length == 4
+      - "firewall_ssh_connection.stdout.split()[2] in (ansible_tailscale0.ipv4.address | default('') | split(',')) or firewall_ssh_connection.stdout.split()[2] in (ansible_tailscale0.ipv6 | default([]) | map(attribute='address') | list)"
+    fail_msg: "Use OpenSSH pela tailnet e confirme acesso ao console antes de habilitar UFW."
+  when: ansible_connection not in ['community.docker.docker', 'docker']
+
+# A regra de acesso vem antes do default deny. Não apagar regras legítimas de day-2.
+- name: Allow SSH on tailscale0 only
+  ufw:
+    rule: allow
+    name: OpenSSH
+    interface: tailscale0
+    direction: in
+
+- name: UFW default deny incoming
+  ufw:
+    direction: incoming
+    policy: deny
+
+- name: UFW default allow outgoing (a política por UID pertence ao role egress)
+  ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Enable UFW
+  ufw:
+    state: enabled

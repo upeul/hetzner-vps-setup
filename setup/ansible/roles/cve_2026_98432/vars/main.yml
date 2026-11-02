@@ -1,0 +1,9 @@
+---
+# Saída de `nft list chain ip cve_2026_98432 prerouting` com espaços colapsados
+# e contador trocado por N. Comparação exata: diferença recarrega a regra e, se
+# continuar, o play falha. Formato do nftables 1.0.9 (Ubuntu 24.04), que mostra
+# a prioridade -300 como `raw`.
+cve_2026_98432_chain_expected: >-
+  table ip cve_2026_98432 { chain prerouting {
+  type filter hook prerouting priority raw; policy accept;
+  meta l4proto tcp ip hdrlength > 5 counter packets N bytes N drop } }
