@@ -14,13 +14,27 @@
       - python3-pip
       - python3-yaml
       - nodejs
-      - npm
       - openssh-server
       - sudo
       - unattended-upgrades
       - apt-listchanges
     state: present
     update_cache: true
+
+# Node de outra origem (ex. NodeSource) já traz npm; o pacote npm do Ubuntu
+# exige o nodejs do Ubuntu e falha com "held broken packages".
+- name: Detectar npm já instalado
+  shell: command -v npm
+  register: base_npm_existente
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Instalar npm do Ubuntu só quando nenhum npm existir
+  apt:
+    name: npm
+    state: present
+  when: base_npm_existente.rc != 0
 
 - name: Timezone UTC
   timezone:
